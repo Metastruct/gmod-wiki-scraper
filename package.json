@@ -1,0 +1,20 @@
+{
+  "name": "gmod-wiki-scraper",
+  "version": "1.0.0",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "yarn build && node lib/index.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.3",
+    "request": "^2.88.0",
+    "request-promise-native": "^1.0.8"
+  },
+  "devDependencies": {
+    "@types/cheerio": "^0.22.15",
+    "@types/request-promise-native": "^1.0.17",
+    "typescript": "^3.7.5"
+  }
+}
