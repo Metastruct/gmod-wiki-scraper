@@ -1,6 +1,12 @@
+import { Promise, promisify } from "bluebird";
 import request from "request-promise-native";
 import cheerio from "cheerio";
+import fs from "fs";
 
+const writeFileAsync = promisify(fs.writeFile);
+const appendFileAsync = promisify(fs.appendFile);
+
+const outFilePath = "declarations.json";
 const baseUrl = "https://wiki.facepunch.com";
 
 function justText(el: Cheerio) {
@@ -102,7 +108,6 @@ type Diff<T, U> = T extends U ? never : T; // Remove types from T that are assig
 export function assert<T>(condition: T): Diff<T, undefined> {
   if (
     condition == null ||
-    (typeof condition === "string" && condition === "") ||
     (typeof condition === "boolean" && condition === false)
   ) {
     throw new Error(`assertion failed`);
@@ -149,7 +154,7 @@ function parseRealm(realm: string): Realm {
 // 	</args>
 // </function>
 
-async function parseXml(xml: CheerioStatic): Promise<ParsedFunc> {
+function parseXml(xml: CheerioStatic): ParsedFunc {
   const func = xml("function");
   const name = assert(func.attr("name"));
   const parent = assert(func.attr("parent"));
@@ -171,23 +176,32 @@ async function parseXml(xml: CheerioStatic): Promise<ParsedFunc> {
 async function outputDeclarations() {
   const functions = await getFunctions();
 
-  for (const func of functions) {
-    const { name, link } = func;
+  await writeFileAsync(outFilePath, "[\n");
 
-    const url = `${baseUrl}${link}~edit`;
-    console.log(name, url);
+  let x = 0;
+  await Promise.map(
+    functions,
+    async ({ name, link }, _, length) => {
+      x += 1;
 
-    const html = await request(url);
-    const $ = cheerio.load(html);
+      const url = `${baseUrl}${link}~edit`;
+      console.log(`[${x}/${length}] ${name}`);
 
-    const code = $("#edit").text();
-    const $xml = cheerio.load(code);
+      const html = await request(url);
+      const $ = cheerio.load(html);
 
-    const parsed = parseXml($xml);
-    console.log(parsed);
+      const code = $("#edit_value").text();
+      const $xml = cheerio.load(code);
 
-    throw "TODO";
-  }
+      const parsed = parseXml($xml);
+      // console.log(parsed);
+
+      await appendFileAsync(outFilePath, JSON.stringify(parsed) + "\n");
+    },
+    { concurrency: 10 }
+  );
+
+  await appendFileAsync(outFilePath, "\n]");
 }
 
 outputDeclarations();

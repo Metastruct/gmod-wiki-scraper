@@ -8,11 +8,13 @@
     "start": "yarn build && node lib/index.js"
   },
   "dependencies": {
+    "bluebird": "^3.7.2",
     "cheerio": "^1.0.0-rc.3",
     "request": "^2.88.0",
     "request-promise-native": "^1.0.8"
   },
   "devDependencies": {
+    "@types/bluebird": "^3.5.29",
     "@types/cheerio": "^0.22.15",
     "@types/request-promise-native": "^1.0.17",
     "typescript": "^3.7.5"
