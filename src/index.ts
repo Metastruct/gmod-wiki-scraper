@@ -6,7 +6,8 @@ import fs from "fs";
 const writeFileAsync = promisify(fs.writeFile);
 const appendFileAsync = promisify(fs.appendFile);
 
-const outFilePath = "declarations.json";
+fs.mkdirSync("dist");
+const outFilePath = "dist/declarations.json";
 const baseUrl = "https://wiki.facepunch.com";
 
 function justText(el: Cheerio) {
