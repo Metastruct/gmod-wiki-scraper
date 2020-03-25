@@ -1,4 +1,5 @@
 import { Promise, promisify } from "bluebird";
+import xml2js from "xml2js";
 import request from "request-promise-native";
 import cheerio from "cheerio";
 import fs from "fs";
@@ -6,8 +7,8 @@ import fs from "fs";
 const writeFileAsync = promisify(fs.writeFile);
 const appendFileAsync = promisify(fs.appendFile);
 
-fs.mkdirSync("dist");
-const outFilePath = "dist/declarations.json";
+fs.mkdirSync("dist", { recursive: true });
+const outFilePath = "dist/functions.json";
 const baseUrl = "https://wiki.facepunch.com";
 
 function justText(el: Cheerio) {
@@ -21,12 +22,12 @@ function justText(el: Cheerio) {
 }
 
 interface Func {
-  name: string;
+  // name: string;
   link: string;
-  realms: Array<Realm>;
+  // realms: Array<Realm>;
 }
 
-type Realm = "Server" | "Client" | "Menu" | "Shared";
+// type Realm = "Server" | "Client" | "Menu" | "Shared";
 
 async function getFunctions(): Promise<Array<Func>> {
   const html = await request(`${baseUrl}/gmod/`);
@@ -82,22 +83,22 @@ async function getFunctions(): Promise<Array<Func>> {
                 throw "no link";
               }
 
-              let realms: Realm[] = [];
+              // let realms: Realm[] = [];
 
-              if (a.hasClass("rs")) {
-                realms.push("Server");
-              }
-              if (a.hasClass("rc")) {
-                realms.push("Client");
-              }
-              if (a.hasClass("rm")) {
-                realms.push("Menu");
-              }
+              // if (a.hasClass("rs")) {
+              //   realms.push("Server");
+              // }
+              // if (a.hasClass("rc")) {
+              //   realms.push("Client");
+              // }
+              // if (a.hasClass("rm")) {
+              //   realms.push("Menu");
+              // }
 
               functions.push({
-                name,
+                // name,
                 link,
-                realms,
+                // realms,
               });
             }
           });
@@ -120,61 +121,16 @@ export function assert<T>(condition: T): Diff<T, undefined> {
   }
 }
 
-interface ParsedFunc {
-  name: string;
-  parent: string;
-  type: string;
-  description: string;
-  realm: Realm;
-  args: Array<Arg>;
-}
+async function parseFunctionPage(link: string): Promise<{}> {
+  const url = `${baseUrl}${link}~edit`;
+  const html = await request(url);
+  const $ = cheerio.load(html);
 
-interface Arg {
-  name: string;
-  type: string;
-  text: string;
-}
+  const code = $("#edit_value").text();
 
-function parseRealm(realm: string): Realm {
-  if (
-    realm === "Server" ||
-    realm === "Client" ||
-    realm === "Menu" ||
-    realm === "Shared"
-    // realm === "Client and Menu" ||
-    // realm === "Shared and Menu"
-  ) {
-    return realm;
-  } else {
-    throw new Error(`${realm} not a Realm`);
-  }
-}
+  const parsed = xml2js.parseStringPromise(code);
 
-// <function name="Add" parent="Angle" type="classfunc">
-// 	<description>Adds the values of the argument angle to the orignal angle. This functions the same as angle1 + angle2 without creating a new angle object, skipping object construction and garbage collection.</description>
-// 	<realm>Shared</realm>
-// 	<args>
-// 		<arg name="angle" type="Angle">The angle to add.</arg>
-// 	</args>
-// </function>
-
-function parseXml(xml: CheerioStatic): ParsedFunc {
-  const func = xml("function");
-  const name = assert(func.attr("name"));
-  const parent = assert(func.attr("parent"));
-  const type = assert(func.attr("type"));
-  const description = assert(func.children("description").text());
-  const realm = parseRealm(assert(func.children("realm").text()));
-  const args: Arg[] = [];
-
-  return {
-    name,
-    parent,
-    type,
-    description,
-    realm,
-    args,
-  };
+  return parsed;
 }
 
 async function outputDeclarations() {
@@ -186,20 +142,12 @@ async function outputDeclarations() {
   let firstWrite = true;
   await Promise.map(
     functions,
-    async ({ name, link }, _, length) => {
+    async ({ link }, _, length) => {
       x += 1;
 
-      const url = `${baseUrl}${link}~edit`;
-      console.log(`[${x}/${length}] ${name}`);
+      console.log(`[${x}/${length}] ${link}`);
 
-      const html = await request(url);
-      const $ = cheerio.load(html);
-
-      const code = $("#edit_value").text();
-      const $xml = cheerio.load(code);
-
-      const parsed = parseXml($xml);
-      // console.log(parsed);
+      const parsed = await parseFunctionPage(link);
 
       let line = JSON.stringify(parsed);
       if (firstWrite) {
@@ -216,4 +164,7 @@ async function outputDeclarations() {
   await appendFileAsync(outFilePath, "\n]");
 }
 
-outputDeclarations();
+outputDeclarations().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
