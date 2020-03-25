@@ -1,8 +1,14 @@
+import fs from "fs";
 import { Promise, promisify } from "bluebird";
 import xml2js from "xml2js";
-import request from "request-promise-native";
 import cheerio from "cheerio";
-import fs from "fs";
+import axios from "axios";
+import rateLimit from "axios-rate-limit";
+
+const request = rateLimit(axios.create(), {
+  maxRequests: 9,
+  perMilliseconds: 1000,
+});
 
 const writeFileAsync = promisify(fs.writeFile);
 const appendFileAsync = promisify(fs.appendFile);
@@ -30,7 +36,7 @@ interface Func {
 // type Realm = "Server" | "Client" | "Menu" | "Shared";
 
 async function getFunctions(): Promise<Array<Func>> {
-  const html = await request(`${baseUrl}/gmod/`);
+  const html = (await request(`${baseUrl}/gmod/`)).data;
   const $ = cheerio.load(html);
 
   const n = $("#sidebar #contents .sectionheader")
@@ -151,7 +157,7 @@ const xmlParser = new xml2js.Parser({
 });
 async function parseFunctionPage(link: string): Promise<any> {
   const url = `${baseUrl}${link}?format=text`;
-  const markup = await request(url);
+  const markup = (await request(url)).data;
 
   const parsed = await xmlParser.parseStringPromise(
     "<wrapper>" + markup.replace(/\r\n/g, "\n") + "</wrapper>"
@@ -188,7 +194,7 @@ async function outputDeclarations() {
         await appendFileAsync(outFilePath, line);
       }
     },
-    { concurrency: 1 }
+    { concurrency: 4 }
   );
 
   await appendFileAsync(outFilePath, "\n]");
@@ -221,7 +227,9 @@ if (false) {
     process.exit(1);
   });
 } else {
+  console.log(new Date());
   outputDeclarations().catch((e) => {
+    console.log(new Date());
     console.error(e);
     process.exit(1);
   });
