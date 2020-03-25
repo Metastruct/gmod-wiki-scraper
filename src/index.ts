@@ -121,16 +121,43 @@ export function assert<T>(condition: T): Diff<T, undefined> {
   }
 }
 
-async function parseFunctionPage(link: string): Promise<{}> {
-  const url = `${baseUrl}${link}~edit`;
-  const html = await request(url);
-  const $ = cheerio.load(html);
+const xmlParser = new xml2js.Parser({
+  async: true,
 
-  const code = $("#edit_value").text();
+  // wiki markup can contain < and & in bodies :(
+  strict: false,
 
-  const parsed = xml2js.parseStringPromise(code);
+  // lowercase tags
+  normalizeTags: true,
 
-  return parsed;
+  // trim text bodies
+  trim: true,
+
+  attrNameProcessors: [(name) => name.toLowerCase()],
+  attrValueProcessors: [
+    (value) => (value === "yes" ? true : value === "no" ? false : value),
+  ],
+
+  valueProcessors: [
+    (value) => (value === "yes" ? true : value === "no" ? false : value),
+  ],
+
+  // don't make array if only 1 item
+  explicitArray: false,
+
+  mergeAttrs: true,
+
+  charkey: "text",
+});
+async function parseFunctionPage(link: string): Promise<any> {
+  const url = `${baseUrl}${link}?format=text`;
+  const markup = await request(url);
+
+  const parsed = await xmlParser.parseStringPromise(
+    "<wrapper>" + markup.replace(/\r\n/g, "\n") + "</wrapper>"
+  );
+
+  return parsed.wrapper;
 }
 
 async function outputDeclarations() {
@@ -147,7 +174,10 @@ async function outputDeclarations() {
 
       console.log(`[${x}/${length}] ${link}`);
 
-      const parsed = await parseFunctionPage(link);
+      const parsed = await parseFunctionPage(link).catch((e) => {
+        console.error(`${link} errored! ${e}`);
+        throw e;
+      });
 
       let line = JSON.stringify(parsed);
       if (firstWrite) {
@@ -158,13 +188,41 @@ async function outputDeclarations() {
         await appendFileAsync(outFilePath, line);
       }
     },
-    { concurrency: 10 }
+    { concurrency: 1 }
   );
 
   await appendFileAsync(outFilePath, "\n]");
 }
 
-outputDeclarations().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+if (false) {
+  function testFunction(f: any) {
+    assert(f.function);
+  }
+
+  async function test() {
+    for (const link of [
+      "/gmod/DLabel:SetDisabled",
+      "/gmod/DModelPanel:SetEntity",
+      "/gmod/DModelPanel:SetFOV",
+    ]) {
+      await parseFunctionPage(link).then((f) => {
+        testFunction(f);
+        console.log(
+          require("util").inspect(f, false, null, true /* enable colors */)
+        );
+      });
+    }
+  }
+
+  // const functions = JSON.parse(fs.readFileSync(outFilePath).toString());
+  // functions.forEach(testFunction);
+  test().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+} else {
+  outputDeclarations().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
