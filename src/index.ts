@@ -65,37 +65,40 @@ async function getFunctions(): Promise<Array<Func>> {
 
             const n = $(el);
             const a = n.children("a");
-            // is a function?
-            assert(a.hasClass("f"));
 
-            const name = justText(a);
-            if (!name || name === "") {
-              throw "no name";
+            if (a.hasClass("f")) {
+              // is a function
+              // TODO handle non-functions
+
+              const name = justText(a);
+              if (!name || name === "") {
+                throw "no name";
+              }
+
+              const link = a.attr("href");
+
+              if (!link) {
+                throw "no link";
+              }
+
+              let realms: Realm[] = [];
+
+              if (a.hasClass("rs")) {
+                realms.push("Server");
+              }
+              if (a.hasClass("rc")) {
+                realms.push("Client");
+              }
+              if (a.hasClass("rm")) {
+                realms.push("Menu");
+              }
+
+              functions.push({
+                name,
+                link,
+                realms,
+              });
             }
-
-            const link = a.attr("href");
-
-            if (!link) {
-              throw "no link";
-            }
-
-            let realms: Realm[] = [];
-
-            if (a.hasClass("rs")) {
-              realms.push("Server");
-            }
-            if (a.hasClass("rc")) {
-              realms.push("Client");
-            }
-            if (a.hasClass("rm")) {
-              realms.push("Menu");
-            }
-
-            functions.push({
-              name,
-              link,
-              realms,
-            });
           });
       });
   });
@@ -179,6 +182,7 @@ async function outputDeclarations() {
   await writeFileAsync(outFilePath, "[\n");
 
   let x = 0;
+  let firstWrite = true;
   await Promise.map(
     functions,
     async ({ name, link }, _, length) => {
@@ -196,7 +200,14 @@ async function outputDeclarations() {
       const parsed = parseXml($xml);
       // console.log(parsed);
 
-      await appendFileAsync(outFilePath, JSON.stringify(parsed) + "\n");
+      let line = JSON.stringify(parsed);
+      if (firstWrite) {
+        firstWrite = false;
+        fs.appendFileSync(outFilePath, line);
+      } else {
+        line = ",\n" + line;
+        await appendFileAsync(outFilePath, line);
+      }
     },
     { concurrency: 10 }
   );

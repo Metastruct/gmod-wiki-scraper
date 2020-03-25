@@ -2,10 +2,8 @@
   "name": "gmod-wiki-declaration-scraper",
   "version": "1.0.0",
   "license": "MIT",
-  "main": "lib/index.js",
   "scripts": {
-    "build": "tsc",
-    "start": "yarn build && node lib/index.js"
+    "start": "ts-node src/index.ts"
   },
   "dependencies": {
     "bluebird": "^3.7.2",
@@ -17,6 +15,7 @@
     "@types/bluebird": "^3.5.29",
     "@types/cheerio": "^0.22.15",
     "@types/request-promise-native": "^1.0.17",
+    "ts-node": "^8.8.1",
     "typescript": "^3.7.5"
   }
 }
