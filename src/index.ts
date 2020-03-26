@@ -3,12 +3,10 @@ import { Promise, promisify } from "bluebird";
 import xml2js from "xml2js";
 import cheerio from "cheerio";
 import axios from "axios";
-import rateLimit from "axios-rate-limit";
+import axiosRetry, { exponentialDelay } from "axios-retry";
 
-const request = rateLimit(axios.create(), {
-  maxRequests: 9,
-  perMilliseconds: 1000,
-});
+const request = axios.create();
+axiosRetry(request, { retries: 100, retryDelay: exponentialDelay });
 
 const writeFileAsync = promisify(fs.writeFile);
 const appendFileAsync = promisify(fs.appendFile);
