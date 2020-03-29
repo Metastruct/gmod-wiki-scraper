@@ -25,13 +25,48 @@ function justText(el: Cheerio) {
     .trim();
 }
 
+type Realm = "Server" | "Client" | "Menu" | "Shared";
 interface Func {
-  // name: string;
+  name: string;
   link: string;
-  // realms: Array<Realm>;
+  realms: Array<Realm>;
 }
 
-// type Realm = "Server" | "Client" | "Menu" | "Shared";
+
+function addFunctionToList(el: Cheerio, funclist: Func[]) : any {
+  const a = el.children("a");
+  if(!a.hasClass("f")) {
+    return;
+  }
+  const name = justText(a);
+  if (!name || name === "") {
+    throw "no name";
+  }
+
+  const link = a.attr("href");
+
+  if (!link) {
+    throw "no link";
+  }
+
+  let realms: Realm[] = [];
+
+  if (a.hasClass("rs")) {
+    realms.push("Server");
+  }
+  if (a.hasClass("rc")) {
+    realms.push("Client");
+  }
+  if (a.hasClass("rm")) {
+    realms.push("Menu");
+  }
+
+  funclist.push({
+    name,
+    link,
+    realms,
+  })
+}
 
 async function getFunctions(): Promise<Array<Func>> {
   const html = (await request(`${baseUrl}/gmod/`)).data;
@@ -51,7 +86,7 @@ async function getFunctions(): Promise<Array<Func>> {
     // big categories
 
     const n = $(el);
-    // const bigCategory = justText(n.children("summary").children("div"));
+    const bigCategory = justText(n.children("summary").children("div"));
 
     n.children("ul")
       .children("li")
@@ -59,54 +94,20 @@ async function getFunctions(): Promise<Array<Func>> {
         // categories
 
         const n = $(el);
+        if(bigCategory === "Globals") {
+          addFunctionToList(n, functions);
+        } else {
 
-        const level2 = n.children("details.level2");
-        // const category = justText(level2.children("summary").children("div"));
-
-        level2
-          .children("ul")
-          .children("li")
-          .each((_, el) => {
-            // functions
-
-            const n = $(el);
-            const a = n.children("a");
-
-            if (a.hasClass("f")) {
-              // is a function
-              // TODO handle non-functions
-
-              const name = justText(a);
-              if (!name || name === "") {
-                throw "no name";
-              }
-
-              const link = a.attr("href");
-
-              if (!link) {
-                throw "no link";
-              }
-
-              // let realms: Realm[] = [];
-
-              // if (a.hasClass("rs")) {
-              //   realms.push("Server");
-              // }
-              // if (a.hasClass("rc")) {
-              //   realms.push("Client");
-              // }
-              // if (a.hasClass("rm")) {
-              //   realms.push("Menu");
-              // }
-
-              functions.push({
-                // name,
-                link,
-                // realms,
-              });
-            }
-          });
-      });
+          const level2 = n.children("details.level2");
+  
+          level2
+            .children("ul")
+            .children("li")
+            .each((_, el) => {
+              addFunctionToList($(el), functions);
+            });
+        }
+    });
   });
 
   return functions;
@@ -173,15 +174,17 @@ async function outputDeclarations() {
   let firstWrite = true;
   await Promise.map(
     functions,
-    async ({ link }, _, length) => {
+    async (func : Func, _, length) => {
       x += 1;
 
-      console.log(`[${x}/${length}] ${link}`);
+      console.log(`[${x}/${length}] ${func.name.padEnd(25, ' ')} (${func.link})`);
 
-      const parsed = await parseFunctionPage(link).catch((e) => {
-        console.error(`${link} errored! ${e}`);
+      const parsed = await parseFunctionPage(func.link).catch((e) => {
+        console.error(`${func.link} errored! ${e}`);
         throw e;
       });
+
+      parsed.realms = func.realms;
 
       let line = JSON.stringify(parsed);
       if (firstWrite) {
@@ -198,7 +201,7 @@ async function outputDeclarations() {
   await appendFileAsync(outFilePath, "\n]");
 }
 
-if (false) {
+if (false || !true) {
   function testFunction(f: any) {
     assert(f.function);
   }
