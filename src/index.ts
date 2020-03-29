@@ -12,7 +12,7 @@ const writeFileAsync = promisify(fs.writeFile);
 const appendFileAsync = promisify(fs.appendFile);
 
 fs.mkdirSync("dist", { recursive: true });
-const outFilePath = "dist/functions.json";
+const outFilePath = "dist/gwiki.json";
 const baseUrl = "https://wiki.facepunch.com";
 
 function justText(el: Cheerio) {
@@ -26,16 +26,21 @@ function justText(el: Cheerio) {
 }
 
 type Realm = "Server" | "Client" | "Menu" | "Shared";
-interface Func {
+enum GWikiType {
+  Function,
+  Enum,
+};
+interface GWikiObject {
   name: string;
   link: string;
   realms: Array<Realm>;
+  type: GWikiType;
 }
 
-
-function addFunctionToList(el: Cheerio, funclist: Func[]) : any {
+function addElementToList(el: Cheerio, funclist: GWikiObject[]) : any {
   const a = el.children("a");
-  if(!a.hasClass("f")) {
+  // The rest are structs and shareds. No real use for them rn
+  if(!a.hasClass("f") && !a.hasClass("enum")) {
     return;
   }
   const name = justText(a);
@@ -44,6 +49,7 @@ function addFunctionToList(el: Cheerio, funclist: Func[]) : any {
   }
 
   const link = a.attr("href");
+  const type = a.hasClass("f") ? GWikiType.Function : GWikiType.Enum;
 
   if (!link) {
     throw "no link";
@@ -65,10 +71,11 @@ function addFunctionToList(el: Cheerio, funclist: Func[]) : any {
     name,
     link,
     realms,
+    type,
   })
 }
 
-async function getFunctions(): Promise<Array<Func>> {
+async function getFunctions(): Promise<Array<GWikiObject>> {
   const html = (await request(`${baseUrl}/gmod/`)).data;
   const $ = cheerio.load(html);
 
@@ -80,7 +87,7 @@ async function getFunctions(): Promise<Array<Func>> {
 
   assert(n.hasClass("section"));
 
-  const functions: Func[] = [];
+  const objects: GWikiObject[] = [];
 
   n.children("details.level1").each((_, el) => {
     // big categories
@@ -92,10 +99,9 @@ async function getFunctions(): Promise<Array<Func>> {
       .children("li")
       .each((_, el) => {
         // categories
-
         const n = $(el);
-        if(bigCategory === "Globals") {
-          addFunctionToList(n, functions);
+        if(bigCategory === "Globals" || bigCategory === "Enums") {
+          addElementToList(n, objects);
         } else {
 
           const level2 = n.children("details.level2");
@@ -104,13 +110,13 @@ async function getFunctions(): Promise<Array<Func>> {
             .children("ul")
             .children("li")
             .each((_, el) => {
-              addFunctionToList($(el), functions);
+              addElementToList($(el), objects);
             });
         }
     });
   });
 
-  return functions;
+  return objects;
 }
 
 type Diff<T, U> = T extends U ? never : T; // Remove types from T that are assignable to U
@@ -154,12 +160,15 @@ const xmlParser = new xml2js.Parser({
 
   charkey: "text",
 });
-async function parseFunctionPage(link: string): Promise<any> {
+async function parseWikiPage(link: string): Promise<any> {
   const url = `${baseUrl}${link}?format=text`;
-  const markup = (await request(url)).data;
-
+  let markup = (await request(url)).data;
+  markup = markup.replace(/\r\n/g, "\n");
+  // Enum pages have weird "Used in <page>ENTITY:IsGay</page>." stuff
+  // Since we dont have any use for it just replace with text
+  markup = markup.replace(/<page>(.*?)<\/page>/g, "$1");
   const parsed = await xmlParser.parseStringPromise(
-    "<wrapper>" + markup.replace(/\r\n/g, "\n") + "</wrapper>"
+    "<wrapper>" + markup + "</wrapper>"
   );
 
   return parsed.wrapper;
@@ -174,17 +183,17 @@ async function outputDeclarations() {
   let firstWrite = true;
   await Promise.map(
     functions,
-    async (func : Func, _, length) => {
+    async (obj : GWikiObject, _, length) => {
       x += 1;
 
-      console.log(`[${x}/${length}] ${func.name.padEnd(25, ' ')} (${func.link})`);
-
-      const parsed = await parseFunctionPage(func.link).catch((e) => {
-        console.error(`${func.link} errored! ${e}`);
+      console.log(`[${x}/${length}] ${obj.name.padEnd(25, ' ')} (${obj.link})`);
+      const parsed = await parseWikiPage(obj.link).catch((e) => {
+        console.error(`${obj.link} errored! ${e}`);
         throw e;
       });
 
-      parsed.realms = func.realms;
+      parsed.realms = obj.realms;
+      parsed.type = GWikiType[obj.type];
 
       let line = JSON.stringify(parsed);
       if (firstWrite) {
@@ -212,7 +221,7 @@ if (false || !true) {
       "/gmod/DModelPanel:SetEntity",
       "/gmod/DModelPanel:SetFOV",
     ]) {
-      await parseFunctionPage(link).then((f) => {
+      await parseWikiPage(link).then((f) => {
         testFunction(f);
         console.log(
           require("util").inspect(f, false, null, true /* enable colors */)
