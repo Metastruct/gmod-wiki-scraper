@@ -16,20 +16,14 @@ const outFilePath = "dist/gwiki.json";
 const baseUrl = "https://wiki.facepunch.com";
 
 function justText(el: Cheerio) {
-  return el
-    .clone()
-    .children()
-    .remove()
-    .end()
-    .text()
-    .trim();
+  return el.clone().children().remove().end().text().trim();
 }
 
 type Realm = "Server" | "Client" | "Menu" | "Shared";
 enum GWikiType {
   Function,
   Enum,
-};
+}
 interface GWikiObject {
   name: string;
   link: string;
@@ -37,10 +31,10 @@ interface GWikiObject {
   type: GWikiType;
 }
 
-function addElementToList(el: Cheerio, funclist: GWikiObject[]) : any {
+function addElementToList(el: Cheerio, funclist: GWikiObject[]): any {
   const a = el.children("a");
   // The rest are structs and shareds. No real use for them rn
-  if(!a.hasClass("f") && !a.hasClass("enum")) {
+  if (!a.hasClass("f") && !a.hasClass("enum")) {
     return;
   }
   const name = justText(a);
@@ -72,7 +66,7 @@ function addElementToList(el: Cheerio, funclist: GWikiObject[]) : any {
     link,
     realms,
     type,
-  })
+  });
 }
 
 async function getFunctions(): Promise<Array<GWikiObject>> {
@@ -100,12 +94,11 @@ async function getFunctions(): Promise<Array<GWikiObject>> {
       .each((_, el) => {
         // categories
         const n = $(el);
-        if(bigCategory === "Globals" || bigCategory === "Enums") {
+        if (bigCategory === "Globals" || bigCategory === "Enums") {
           addElementToList(n, objects);
         } else {
-
           const level2 = n.children("details.level2");
-  
+
           level2
             .children("ul")
             .children("li")
@@ -113,7 +106,7 @@ async function getFunctions(): Promise<Array<GWikiObject>> {
               addElementToList($(el), objects);
             });
         }
-    });
+      });
   });
 
   return objects;
@@ -183,10 +176,10 @@ async function outputDeclarations() {
   let firstWrite = true;
   await Promise.map(
     functions,
-    async (obj : GWikiObject, _, length) => {
+    async (obj: GWikiObject, _, length) => {
       x += 1;
 
-      console.log(`[${x}/${length}] ${obj.name.padEnd(25, ' ')} (${obj.link})`);
+      console.log(`[${x}/${length}] ${obj.name.padEnd(25, " ")} (${obj.link})`);
       const parsed = await parseWikiPage(obj.link).catch((e) => {
         console.error(`${obj.link} errored! ${e}`);
         throw e;
