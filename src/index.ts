@@ -1,5 +1,5 @@
 import fs from "fs";
-import { Promise, promisify } from "bluebird";
+import { promisify } from "bluebird";
 import xml2js from "xml2js";
 import cheerio from "cheerio";
 import axios from "axios";
@@ -155,7 +155,8 @@ const xmlParser = new xml2js.Parser({
 });
 async function parseWikiPage(link: string): Promise<any> {
   const url = `${baseUrl}${link}?format=text`;
-  let markup = (await request(url)).data;
+  let response = await request(url);
+  let markup = response.data;
   markup = markup.replace(/\r\n/g, "\n");
   // Enum pages have weird "Used in <page>ENTITY:IsGay</page>." stuff
   // Since we dont have any use for it just replace with text
@@ -174,41 +175,57 @@ async function outputDeclarations() {
 
   let x = 0;
   let firstWrite = true;
-  await Promise.map(
-    functions,
-    async (obj: GWikiObject, _, length) => {
-      x += 1;
+  let finished = false;
+  let length = functions.length;
+  let takeAndProcess = async (): Promise<void> => {
+    x += 1;
+    if(finished){
+      console.log(finished,"finished");
+      return;
+    }
+    let obj = functions.shift();
+    if(!obj) {
+      finished = true;
+      console.log(finished,"now finished");
+      return;
+    }
 
-      console.log(`[${x}/${length}] ${obj.name.padEnd(25, " ")} (${obj.link})`);
-      const parsed = await parseWikiPage(obj.link).catch((e) => {
-        console.error(`${obj.link} errored! ${e}`);
-        throw e;
-      });
+    console.log(`[${x}/${length}] ${obj.name.padEnd(25, " ")} (${obj.link})`);
+    const parsed = await parseWikiPage(obj.link).catch((e) => {
+      console.error(`${obj!.link} errored! ${e}`);
+      throw e;
+    });
 
-      parsed.realms = obj.realms;
-      parsed.type = GWikiType[obj.type];
+    parsed.realms = obj.realms;
+    parsed.type = GWikiType[obj.type];
 
-      let line = JSON.stringify(parsed);
-      if (firstWrite) {
-        firstWrite = false;
-        fs.appendFileSync(outFilePath, line);
-      } else {
-        line = ",\n" + line;
-        await appendFileAsync(outFilePath, line);
-      }
-    },
-    { concurrency: 4 }
-  );
+    let line = JSON.stringify(parsed);
+    if (firstWrite) {
+      firstWrite = false;
+      fs.appendFileSync(outFilePath, line);
+    } else {
+      line = ",\n" + line;
+      await appendFileAsync(outFilePath, line);
+    }
+    return await takeAndProcess();
+  }
+
+  let promises: Promise<void>[] = []; 
+  for (let i = 0; i < 4; i++) {
+    promises.push(takeAndProcess())   
+  }
+
+  await Promise.all(promises);
 
   await appendFileAsync(outFilePath, "\n]");
 }
 
 if (false || !true) {
-  function testFunction(f: any) {
+  let testFunction = (f: any) => {
     assert(f.function);
   }
 
-  async function test() {
+  let test = async () => {
     for (const link of [
       "/gmod/DLabel:SetDisabled",
       "/gmod/DModelPanel:SetEntity",
@@ -235,5 +252,7 @@ if (false || !true) {
     console.log(new Date());
     console.error(e);
     process.exit(1);
+  }).then(() => {
+    process.exit();
   });
 }
