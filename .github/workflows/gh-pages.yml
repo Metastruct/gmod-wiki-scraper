@@ -5,28 +5,26 @@ on:
     branches:
       - master
 
-
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-      - name: Use Node.js 13
-        uses: actions/setup-node@v1
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
         with:
-          node-version: 13
+          node-version: 22
+          cache: npm
 
-      - name: Build
+      - name: Install and build
         run: |
-          yarn
-          yarn start
-        env:
-          CI: true
+          npm ci
+          npm start
 
       - name: Deploy GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist

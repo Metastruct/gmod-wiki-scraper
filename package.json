@@ -1,23 +1,23 @@
 {
   "name": "gmod-wiki-scraper",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "start": "ts-node src/index.ts"
+    "start": "tsx src/index.ts"
   },
   "dependencies": {
-    "axios": "^0.21.1",
-    "axios-retry": "^3.1.2",
-    "bluebird": "^3.7.2",
-    "cheerio": "^1.0.0-rc.3",
-    "xml2js": "^0.4.23"
+    "axios": "^1.7.0",
+    "axios-retry": "^4.4.0",
+    "cheerio": "^1.0.0",
+    "xml2js": "^0.6.2"
   },
   "devDependencies": {
-    "@types/bluebird": "^3.5.29",
-    "@types/cheerio": "^0.22.15",
-    "@types/xml2js": "^0.4.5",
-    "prettier": "2.0.2",
-    "ts-node": "^8.8.1",
-    "typescript": "^3.7.5"
+    "@types/xml2js": "^0.4.14",
+    "prettier": "^3.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
   }
 }

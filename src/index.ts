@@ -1,258 +1,210 @@
-import fs from "fs";
-import { promisify } from "bluebird";
+import fs from "fs/promises";
+import { mkdirSync } from "fs";
 import xml2js from "xml2js";
-import cheerio from "cheerio";
+import * as cheerio from "cheerio";
+import type { Element } from "domhandler";
 import axios from "axios";
 import axiosRetry, { exponentialDelay } from "axios-retry";
 
 const request = axios.create();
 axiosRetry(request, { retries: 100, retryDelay: exponentialDelay });
 
-const writeFileAsync = promisify(fs.writeFile);
-const appendFileAsync = promisify(fs.appendFile);
-
-fs.mkdirSync("dist", { recursive: true });
+mkdirSync("dist", { recursive: true });
 const outFilePath = "dist/gwiki.json";
 const baseUrl = "https://wiki.facepunch.com";
 
-function justText(el: Cheerio) {
+const CONCURRENCY = 4;
+
+function justText(el: cheerio.Cheerio<Element>) {
   return el.clone().children().remove().end().text().trim();
 }
 
 type Realm = "Server" | "Client" | "Menu" | "Shared";
+
 enum GWikiType {
   Function,
   Enum,
 }
+
 interface GWikiObject {
   name: string;
   link: string;
-  realms: Array<Realm>;
+  realms: Realm[];
   type: GWikiType;
 }
 
-function addElementToList(el: Cheerio, funclist: GWikiObject[]): any {
-  const a = el.children("a");
-  // The rest are structs and shareds. No real use for them rn
-  if (!a.hasClass("f") && !a.hasClass("enum")) {
+// Anchor classes we scrape. All of these resolve to a wiki page whose markup
+// is either a <function ...> block (functions, hooks, library fields) or an
+// <enum> block — both shapes are consumed downstream (gmod-monaco). Panels
+// (<panel>) and structures (<structure>) use different markup that nothing
+// consumes yet, so they are intentionally left out.
+const SCRAPED_CLASSES = ["f", "enum", "event", "field"] as const;
+
+function addElementToList(
+  a: cheerio.Cheerio<Element>,
+  funclist: GWikiObject[],
+) {
+  if (!SCRAPED_CLASSES.some((c) => a.hasClass(c))) {
     return;
   }
+
   const name = justText(a);
-  if (!name || name === "") {
-    throw "no name";
+  if (!name) {
+    throw new Error("no name");
   }
 
   const link = a.attr("href");
-  const type = a.hasClass("f") ? GWikiType.Function : GWikiType.Enum;
-
   if (!link) {
-    throw "no link";
+    throw new Error("no link");
   }
 
-  let realms: Realm[] = [];
+  // Only `enum` pages are <enum> blocks; functions, hooks (`event`) and
+  // library fields (`field`) are all <function> blocks. The precise kind
+  // (hook/classfunc/libraryfield/...) is carried by the page markup itself.
+  const type = a.hasClass("enum") ? GWikiType.Enum : GWikiType.Function;
 
-  if (a.hasClass("rs")) {
-    realms.push("Server");
-  }
-  if (a.hasClass("rc")) {
-    realms.push("Client");
-  }
-  if (a.hasClass("rm")) {
-    realms.push("Menu");
-  }
+  const realms: Realm[] = [];
+  if (a.hasClass("rs")) realms.push("Server");
+  if (a.hasClass("rc")) realms.push("Client");
+  if (a.hasClass("rm")) realms.push("Menu");
 
-  funclist.push({
-    name,
-    link,
-    realms,
-    type,
-  });
+  funclist.push({ name, link, realms, type });
 }
 
-async function getFunctions(): Promise<Array<GWikiObject>> {
+async function getFunctions(): Promise<GWikiObject[]> {
   const html = (await request(`${baseUrl}/gmod/`)).data;
   const $ = cheerio.load(html);
 
   const n = $("#sidebar #contents .sectionheader")
-    .filter((_, el) => {
-      return $(el).text() === "Developer Reference";
-    })
+    .filter((_, el) => $(el).text() === "Developer Reference")
     .next();
 
   assert(n.hasClass("section"));
 
   const objects: GWikiObject[] = [];
 
-  n.children("details.level1").each((_, el) => {
-    // big categories
-
-    const n = $(el);
-    const bigCategory = justText(n.children("summary").children("div"));
-
-    n.children("ul")
-      .children("li")
-      .each((_, el) => {
-        // categories
-        const n = $(el);
-        if (bigCategory === "Globals" || bigCategory === "Enums") {
-          addElementToList(n, objects);
-        } else {
-          const level2 = n.children("details.level2");
-
-          level2
-            .children("ul")
-            .children("li")
-            .each((_, el) => {
-              addElementToList($(el), objects);
-            });
-        }
-      });
+  // Sweep the whole section for the anchor classes we scrape rather than
+  // matching category display names — the wiki renames categories (e.g.
+  // "Enums" -> "Enumerations") and nests them inconsistently, which used to
+  // silently drop entire content types.
+  const selector = SCRAPED_CLASSES.map((c) => `a.${c}`).join(", ");
+  n.find(selector).each((_, el) => {
+    addElementToList($(el), objects);
   });
+
+  assert(objects.length > 0);
 
   return objects;
 }
 
-type Diff<T, U> = T extends U ? never : T; // Remove types from T that are assignable to U
-
-export function assert<T>(condition: T): Diff<T, undefined> {
+function assert<T>(condition: T): Exclude<T, undefined | null | false> {
   if (
     condition == null ||
     (typeof condition === "boolean" && condition === false)
   ) {
-    throw new Error(`assertion failed`);
-  } else {
-    return condition as Diff<T, undefined>;
+    throw new Error("assertion failed");
   }
+  return condition as Exclude<T, undefined | null | false>;
 }
 
-const xmlParser = new xml2js.Parser({
+// xml2js.Parser holds internal SAX state and is NOT safe to reuse across
+// concurrent parseStringPromise() calls — doing so cross-contaminates results.
+// Keep options here and construct a fresh Parser per parse (see parseWikiPage).
+const xmlParserOptions: xml2js.ParserOptions = {
   async: true,
-
-  // wiki markup can contain < and & in bodies :(
   strict: false,
-
-  // lowercase tags
   normalizeTags: true,
-
-  // trim text bodies
   trim: true,
-
-  attrNameProcessors: [(name) => name.toLowerCase()],
+  attrNameProcessors: [(name: string) => name.toLowerCase()],
   attrValueProcessors: [
-    (value) => (value === "yes" ? true : value === "no" ? false : value),
+    (value: string) =>
+      value === "yes" ? true : value === "no" ? false : value,
   ],
-
   valueProcessors: [
-    (value) => (value === "yes" ? true : value === "no" ? false : value),
+    (value: string) =>
+      value === "yes" ? true : value === "no" ? false : value,
   ],
-
-  // don't make array if only 1 item
   explicitArray: false,
-
   mergeAttrs: true,
-
   charkey: "text",
-});
+};
+
 async function parseWikiPage(link: string): Promise<any> {
   const url = `${baseUrl}${link}?format=text`;
-  let response = await request(url);
-  let markup = response.data;
+  const response = await request(url);
+  let markup: string = response.data;
   markup = markup.replace(/\r\n/g, "\n");
-  // Enum pages have weird "Used in <page>ENTITY:IsGay</page>." stuff
-  // Since we dont have any use for it just replace with text
-  markup = markup.replace(/<page>(.*?)<\/page>/g, "$1");
-  const parsed = await xmlParser.parseStringPromise(
-    "<wrapper>" + markup + "</wrapper>"
+  // Wiki bodies contain inline <page> cross-reference links, both bare
+  // (<page>Target</page>) and labelled (<page text="Label">Target</page>).
+  // We have no use for the link, so flatten to the visible text — otherwise
+  // xml2js parses them into nested objects that fragment the surrounding
+  // description/arg text.
+  markup = markup.replace(
+    /<page\b([^>]*)>([\s\S]*?)<\/page>/g,
+    (_m, attrs, inner) => {
+      const label = attrs.match(/\btext\s*=\s*["']([^"']*)["']/);
+      return label ? label[1] : inner;
+    },
   );
-
+  // <br> / <br/> are layout-only and otherwise leak in as junk `br` nodes.
+  markup = markup.replace(/<br\s*\/?>/g, "\n");
+  const parser = new xml2js.Parser(xmlParserOptions);
+  const parsed = await parser.parseStringPromise(
+    "<wrapper>" + markup + "</wrapper>",
+  );
   return parsed.wrapper;
 }
 
 async function outputDeclarations() {
   const functions = await getFunctions();
 
-  await writeFileAsync(outFilePath, "[\n");
+  // Guard against silently publishing incomplete data if the sidebar markup
+  // changes and a whole content type stops being detected.
+  const enumCount = functions.filter((o) => o.type === GWikiType.Enum).length;
+  const funcCount = functions.length - enumCount;
+  console.log(
+    `Discovered ${funcCount} function-like pages (functions/hooks/fields) and ${enumCount} enums`,
+  );
+  assert(enumCount > 0);
+  assert(funcCount > 0);
 
-  let x = 0;
-  let firstWrite = true;
-  let finished = false;
-  let length = functions.length;
-  let takeAndProcess = async (): Promise<void> => {
-    x += 1;
-    if(finished){
-      console.log(finished,"finished");
-      return;
+  const total = functions.length;
+  const results: string[] = [];
+  let index = 0;
+
+  async function worker() {
+    while (index < functions.length) {
+      const i = index++;
+      const obj = functions[i];
+
+      console.log(`[${i + 1}/${total}] ${obj.name.padEnd(25)} (${obj.link})`);
+
+      try {
+        const parsed = await parseWikiPage(obj.link);
+        parsed.realms = obj.realms;
+        parsed.type = GWikiType[obj.type];
+        results[i] = JSON.stringify(parsed);
+      } catch (e) {
+        console.error(`${obj.link} errored! ${e}`);
+        throw e;
+      }
     }
-    let obj = functions.shift();
-    if(!obj) {
-      finished = true;
-      console.log(finished,"now finished");
-      return;
-    }
-
-    console.log(`[${x}/${length}] ${obj.name.padEnd(25, " ")} (${obj.link})`);
-    const parsed = await parseWikiPage(obj.link).catch((e) => {
-      console.error(`${obj!.link} errored! ${e}`);
-      throw e;
-    });
-
-    parsed.realms = obj.realms;
-    parsed.type = GWikiType[obj.type];
-
-    let line = JSON.stringify(parsed);
-    if (firstWrite) {
-      firstWrite = false;
-      fs.appendFileSync(outFilePath, line);
-    } else {
-      line = ",\n" + line;
-      await appendFileAsync(outFilePath, line);
-    }
-    return await takeAndProcess();
   }
 
-  let promises: Promise<void>[] = []; 
-  for (let i = 0; i < 4; i++) {
-    promises.push(takeAndProcess())   
-  }
+  const workers = Array.from({ length: CONCURRENCY }, () => worker());
+  await Promise.all(workers);
 
-  await Promise.all(promises);
-
-  await appendFileAsync(outFilePath, "\n]");
+  await fs.writeFile(outFilePath, "[\n" + results.join(",\n") + "\n]");
 }
 
-if (false || !true) {
-  let testFunction = (f: any) => {
-    assert(f.function);
-  }
-
-  let test = async () => {
-    for (const link of [
-      "/gmod/DLabel:SetDisabled",
-      "/gmod/DModelPanel:SetEntity",
-      "/gmod/DModelPanel:SetFOV",
-    ]) {
-      await parseWikiPage(link).then((f) => {
-        testFunction(f);
-        console.log(
-          require("util").inspect(f, false, null, true /* enable colors */)
-        );
-      });
-    }
-  }
-
-  // const functions = JSON.parse(fs.readFileSync(outFilePath).toString());
-  // functions.forEach(testFunction);
-  test().catch((e) => {
-    console.error(e);
-    process.exit(1);
-  });
-} else {
-  console.log(new Date());
-  outputDeclarations().catch((e) => {
+console.log(new Date());
+outputDeclarations()
+  .then(() => {
+    console.log(new Date());
+    process.exit();
+  })
+  .catch((e) => {
     console.log(new Date());
     console.error(e);
     process.exit(1);
-  }).then(() => {
-    process.exit();
   });
-}
