@@ -183,6 +183,10 @@ async function outputDeclarations() {
         const parsed = await parseWikiPage(obj.link);
         parsed.realms = obj.realms;
         parsed.type = GWikiType[obj.type];
+        // Page path (e.g. "/gmod/Entity:SetPos", "/gmod/Enums/ACT"). Consumers
+        // link straight to the wiki with it; enum pages in particular are
+        // otherwise unidentifiable, since the markup never names the table.
+        parsed.link = obj.link;
         results[i] = JSON.stringify(parsed);
       } catch (e) {
         console.error(`${obj.link} errored! ${e}`);
